@@ -1,12 +1,9 @@
 import requests
-from datetime import datetime
-import pytz
-from typing import Dict, Any
-from tqdm import tqdm
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import csv
+import sqlite3
 import os
+import time
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def load_last_processed_id():
     if os.path.exists('last_processed_id.txt'):
@@ -21,7 +18,8 @@ def save_last_processed_id(last_id):
 def fetch_and_process_urls(urls):
     def fetch_url(url):
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
             item = response.json()
             if item and item.get("type") == "story" and item.get("url"):
                 story_data = {
@@ -37,7 +35,7 @@ def fetch_and_process_urls(urls):
             print(f"Error fetching {url}: {str(e)}")
         return None
 
-    with ThreadPoolExecutor(max_workers=2) as executor:  # Reduced number of workers
+    with ThreadPoolExecutor(max_workers=2) as executor:  # Adjusted for low RAM
         futures = {executor.submit(fetch_url, url): url for url in urls}
         for future in tqdm(as_completed(futures), total=len(urls), desc="Fetching URLs"):
             result = future.result()
@@ -56,44 +54,55 @@ def scrape_hackernews():
     else:
         start_id = max_id - 1
 
-    csv_file = "hackernews_stories.csv"
-    fieldnames = ["url", "title", "text", "website", "time", "label"]
+    db_path = 'hackernews_stories.db'
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS data (
+                    url TEXT PRIMARY KEY,
+                    title TEXT,
+                    text TEXT,
+                    website TEXT,
+                    time TEXT,
+                    label TEXT
+                )''')
+    conn.commit()
 
-    mode = 'a' if last_processed_id else 'w'
-    with open(csv_file, mode, newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if mode == 'w':
-            writer.writeheader()
+    chunk_size = 1000  # Adjust as needed
+    current_id = start_id
+    chunk_count = 0
+    total_chunks_estimate = (start_id - 1) // chunk_size + 1
 
-        chunk_size = 1000  # Adjust as needed
-        current_id = start_id
-        chunk_count = 0
-        total_chunks_estimate = (start_id - 1) // chunk_size + 1
+    while current_id > 1:
+        chunk_ids = range(current_id, max(1, current_id - chunk_size), -1)
+        urls = [f"https://hacker-news.firebaseio.com/v0/item/{id}.json" for id in chunk_ids]
 
-        while current_id > 1:
-            chunk_ids = range(current_id, max(1, current_id - chunk_size), -1)
-            urls = [f"https://hacker-news.firebaseio.com/v0/item/{id}.json" for id in chunk_ids]
+        batch = []
+        for story in fetch_and_process_urls(urls):
+            batch.append((story['url'], story['title'], story['text'], story['website'], story['time'], story['label']))
 
-            # Use generator to fetch and write stories one by one
-            for story in fetch_and_process_urls(urls):
-                writer.writerow(story)
-                f.flush()  # Ensure data is written to disk
+        # Insert stories
+        if batch:
+            c.executemany('''INSERT OR IGNORE INTO data 
+                             (url, title, text, website, time, label) 
+                             VALUES (?, ?, ?, ?, ?, ?)''', batch)
+            conn.commit()
 
-            # Save progress after each chunk
-            last_processed_id = chunk_ids[0]
-            save_last_processed_id(last_processed_id)
+        # Save progress after each chunk
+        last_processed_id = chunk_ids[0]
+        save_last_processed_id(last_processed_id)
 
-            chunk_count += 1
-            print(f"Finished processing chunk {chunk_count}/{total_chunks_estimate}")
-            print(f"Last processed ID: {last_processed_id}")
+        chunk_count += 1
+        print(f"Finished processing chunk {chunk_count}/{total_chunks_estimate}")
+        print(f"Last processed ID: {last_processed_id}")
 
-            # Prepare for the next chunk
-            current_id -= chunk_size
+        # Prepare for the next chunk
+        current_id -= chunk_size
 
-            # Add a small delay between chunks to allow for I/O operations
-            time.sleep(0.1)
+        # Add a small delay between chunks to manage resources
+        time.sleep(0.1)
 
-    print(f"All stories saved to {csv_file}")
+    conn.close()
+    print(f"All stories saved to {db_path}")
 
 if __name__ == "__main__":
     scrape_hackernews()

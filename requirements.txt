@@ -2,3 +2,4 @@ beautifulsoup4>=4.12.3
 pytz>=2024.2
 requests>=2.32.3
 tqdm>=4.66.5
+markdownify>=0.13.1
