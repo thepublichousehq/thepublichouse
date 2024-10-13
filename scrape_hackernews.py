@@ -5,18 +5,44 @@ import time
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def load_last_processed_id():
+def load_last_processed_id() -> int | None:
+    """Loads the last processed ID from a file.
+
+    Returns:
+        The last processed ID, or None if the file doesn't exist.
+    """
     if os.path.exists('last_processed_id.txt'):
         with open('last_processed_id.txt', 'r') as f:
             return int(f.read().strip())
     return None
 
-def save_last_processed_id(last_id):
+def save_last_processed_id(last_id: int):
+    """Saves the last processed ID to a file.
+
+    Args:
+        last_id: The ID to save.
+    """
     with open('last_processed_id.txt', 'w') as f:
         f.write(str(last_id))
 
-def fetch_and_process_urls(urls):
-    def fetch_url(url):
+def fetch_and_process_urls(urls: list[str]):
+    """Fetches and processes a list of URLs.
+
+    Args:
+        urls: The URLs to fetch.
+
+    Yields:
+        A dictionary of story data for each valid story URL.
+    """
+    def fetch_url(url: str) -> dict | None:
+        """Fetches data from a single URL.
+
+        Args:
+            url: The URL to fetch.
+
+        Returns:
+            A dictionary of story data, or None if an error occurred or the item is not a story.
+        """
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
@@ -43,6 +69,7 @@ def fetch_and_process_urls(urls):
                 yield result
 
 def scrape_hackernews():
+    """Scrapes Hacker News stories and saves them to a SQLite database."""
     print("Starting Hacker News scraping")
 
     max_id = requests.get("https://hacker-news.firebaseio.com/v0/maxitem.json").json()

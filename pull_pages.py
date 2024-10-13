@@ -6,7 +6,15 @@ import sqlite3
 import os
 from tqdm import tqdm
 
-def pull_page(url):
+def pull_page(url: str) -> tuple[str, str]:
+    """Fetches the title and markdown-formatted content of a given URL.
+
+    Args:
+        url: The URL of the page to fetch.
+
+    Returns:
+        A tuple containing the page title and content. Returns empty strings if an error occurs.
+    """
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -17,7 +25,12 @@ def pull_page(url):
     except Exception as e:
         return '', ''  # Return empty strings if any exception occurs
 
-def create_database(db_path):
+def create_database(db_path: str) -> None:
+    """Creates a SQLite database with the specified schema.
+
+    Args:
+        db_path: Path to the database file.
+    """
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS data (
@@ -31,7 +44,12 @@ def create_database(db_path):
     conn.commit()
     conn.close()
 
-def update_database(db_path):
+def update_database(db_path: str) -> None:
+    """Updates database records with missing titles and text content.
+
+    Args:
+        db_path: Path to the database file.
+    """
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM data WHERE title = '' OR text = ''")
@@ -56,7 +74,7 @@ if __name__ == "__main__":
 
     if not os.path.exists(db_path):
         print("Creating database...")
-        create_database(db_path, input_csv)
+        create_database(db_path)
     else:
         print("Database already exists. Skipping creation.")
 
