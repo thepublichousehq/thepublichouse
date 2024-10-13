@@ -5,6 +5,7 @@ from markdownify import markdownify as md
 import sqlite3
 import os
 from tqdm import tqdm
+import concurrent.futures
 
 def pull_page(url: str) -> tuple[str, str]:
     """Fetches the title and markdown-formatted content of a given URL.
@@ -23,7 +24,8 @@ def pull_page(url: str) -> tuple[str, str]:
         content = md(str(soup.body)) if soup.body else ''
         return title, content
     except Exception as e:
-        return '', ''  # Return empty strings if any exception occurs
+        print(f"Error fetching {url}: {str(e)}")
+        return '', ''
 
 def create_database(db_path: str) -> None:
     """Creates a SQLite database with the specified schema.
@@ -49,23 +51,37 @@ def update_database(db_path: str) -> None:
 
     Args:
         db_path: Path to the database file.
+        batch_size: Number of URLs to process in each batch.
     """
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
+    
     c.execute("SELECT COUNT(*) FROM data WHERE title = '' OR text = ''")
     total_rows = c.fetchone()[0]
 
     progress_bar = tqdm(total=total_rows, unit='rows', desc='Updating records')
 
-    c.execute("SELECT url FROM data WHERE title = '' OR text = ''")
-    urls = (row[0] for row in c.fetchall())
-
-    for url in urls:
+    def process_url(url: str) -> tuple[str, str, str]:
         title, text = pull_page(url)
-        c.execute("UPDATE data SET title = ?, text = ? WHERE url = ?", (title, text, url))
-        conn.commit()
-        progress_bar.update(1)
-    
+        return url, title, text
+
+    batch_size = 100
+    offset = 0
+    while True:
+        c.execute("SELECT url FROM data WHERE title = '' OR text = '' LIMIT ? OFFSET ?", (batch_size, offset))
+        urls = [row[0] for row in c.fetchall()]
+        
+        if not urls:
+            break  # No more URLs to process
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            for url, title, text in executor.map(process_url, urls):
+                c.execute("UPDATE data SET title = ?, text = ? WHERE url = ?", (title, text, url))
+                conn.commit()
+                progress_bar.update(1)
+
+        offset += batch_size
+
     progress_bar.close()
     conn.close()
 
